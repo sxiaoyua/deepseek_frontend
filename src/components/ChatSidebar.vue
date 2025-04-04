@@ -14,7 +14,7 @@
         :conversations="conversations"
         :active-id="activeId"
         @select="$emit('select', $event)"
-        @action="$emit('action', $event)"
+        @action="(command, id) => $emit('action', command, id)"
         @create="$emit('create')"
       />
     </div>
