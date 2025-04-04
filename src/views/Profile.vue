@@ -133,7 +133,7 @@ const profileData = reactive({
 
 // 头像上传相关
 const avatarUrl = ref('');
-const WORKER_URL = 'https://curly-block-f48e.2019752122.workers.dev'; // 图片上传服务URL
+const WORKER_URL = import.meta.env.VITE_WORKER_URL; // 使用环境变量
 const isUploading = ref(false);
 const uploadProgress = ref(0);
 

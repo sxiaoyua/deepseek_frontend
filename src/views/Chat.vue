@@ -127,7 +127,7 @@ const imageUrl = ref('');
 const imageFile = ref(null);
 const uploadProgress = ref(0);
 const isUploading = ref(false);
-const WORKER_URL = 'https://curly-block-f48e.2019752122.workers.dev'; // 替换为您的图片上传服务URL
+const WORKER_URL = import.meta.env.VITE_WORKER_URL; // 使用环境变量
 
 // 模型选择状态
 const modelSelectVisible = ref(false);
