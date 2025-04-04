@@ -10,7 +10,7 @@ import axios from 'axios'
 import './style.css'
 
 // 配置axios默认设置
-axios.defaults.baseURL = 'https://deepseek-backend-5u48.onrender.com/api'
+axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 // 从本地存储中获取token并设置到请求头
 const token = localStorage.getItem('token')

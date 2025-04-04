@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import axios from 'axios';
 
 // 设置基础URL
-const API_URL = 'https://deepseek-backend-5u48.onrender.com/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export const useConversationStore = defineStore('conversation', {
   state: () => ({
