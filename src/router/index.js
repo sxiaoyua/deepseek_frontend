@@ -59,17 +59,12 @@ const routes = [
     beforeEnter: requireAuth
   },
   {
-    path: '/chat/:id',
-    name: 'chatDetail',
-    component: Chat,
-    beforeEnter: requireAuth
-  },
-  {
     path: '/profile',
     name: 'profile',
     component: Profile,
     beforeEnter: requireAuth
   },
+  // 捕获所有未匹配的路由并重定向到首页
   {
     path: '/:catchAll(.*)',
     redirect: '/'
