@@ -13,7 +13,11 @@ export const useConversationStore = defineStore('conversation', {
     // 新增模型相关状态
     availableModels: [],
     currentModel: null,
-    modelCapabilities: {}
+    modelCapabilities: {},
+    // 新增：流式响应状态
+    streamingMessage: null,
+    isStreaming: false,
+    streamController: null
   }),
   
   getters: {
@@ -251,27 +255,196 @@ export const useConversationStore = defineStore('conversation', {
           payload.conversationId = conversationId;
         }
         
-        const response = await axios.post(`${API_URL}/chat/send`, payload);
-        const data = response.data.data;
+        // 判断是否使用流式响应
+        const currentModel = this.currentModel;
+        const useStream = currentModel && currentModel.includes('deepseek');
         
-        // 如果是新对话，需要添加到对话列表
-        if (!conversationId) {
-          await this.getConversation(data.conversationId);
-          await this.getConversations();
+        if (useStream) {
+          return this.sendStreamMessage(payload);
         } else {
-          // 更新当前对话中的消息
-          if (this.currentConversation && this.currentConversation._id === conversationId) {
-            await this.getConversation(conversationId);
+          // 使用普通响应
+          const response = await axios.post(`${API_URL}/chat/send`, payload);
+          const data = response.data.data;
+          
+          // 如果是新对话，需要添加到对话列表
+          if (!conversationId) {
+            await this.getConversation(data.conversationId);
+            await this.getConversations();
+          } else {
+            // 更新当前对话中的消息
+            if (this.currentConversation && this.currentConversation._id === conversationId) {
+              await this.getConversation(conversationId);
+            }
           }
+          
+          return response.data;
         }
-        
-        return response.data;
       } catch (error) {
         this.error = error.response?.data?.message || '发送消息失败';
         throw error;
       } finally {
         this.loading = false;
       }
+    },
+    
+    // 新增：发送流式消息
+    async sendStreamMessage(payload) {
+      try {
+        // 初始化流式响应状态
+        this.isStreaming = true;
+        this.streamingMessage = {
+          role: 'assistant',
+          content: '',
+          reasoning: '',
+          hasReasoning: false,
+          timestamp: new Date()
+        };
+        
+        // 创建AbortController以便在需要时中断请求
+        this.streamController = new AbortController();
+        const { signal } = this.streamController;
+        
+        // 发起fetch请求
+        const response = await fetch(`${API_URL}/chat/send-stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify(payload),
+          signal
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // 处理返回的流
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let conversationId = null;
+        
+        // 处理数据流
+        const processStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              
+              if (done) {
+                console.log('流结束');
+                break;
+              }
+              
+              // 解码并添加到缓冲区
+              buffer += decoder.decode(value, { stream: true });
+              
+              // 处理完整的SSE事件
+              const events = buffer.split('\n\n');
+              buffer = events.pop() || ''; // 保留最后一个不完整的事件
+              
+              for (const event of events) {
+                if (!event.trim()) continue;
+                
+                const lines = event.split('\n');
+                const eventType = lines[0].replace('event: ', '');
+                const eventData = lines[1].replace('data: ', '');
+                
+                try {
+                  const data = JSON.parse(eventData);
+                  
+                  switch (eventType) {
+                    case 'start':
+                      console.log('开始事件:', data);
+                      if (data.conversationId) {
+                        conversationId = data.conversationId;
+                      }
+                      break;
+                      
+                    case 'reasoning':
+                      // 接收到思考过程
+                      this.streamingMessage.hasReasoning = true;
+                      this.streamingMessage.reasoning += data.chunk;
+                      break;
+                      
+                    case 'content':
+                      // 接收到内容
+                      this.streamingMessage.content += data.chunk;
+                      break;
+                      
+                    case 'complete':
+                      console.log('完成事件:', data);
+                      // 完成后更新对话
+                      if (data.conversationId) {
+                        conversationId = data.conversationId;
+                      }
+                      
+                      // 保存最终消息
+                      const finalMessage = { ...this.streamingMessage };
+                      
+                      // 重置流式状态
+                      this.streamingMessage = null;
+                      this.isStreaming = false;
+                      
+                      // 刷新对话数据
+                      if (conversationId) {
+                        await this.getConversation(conversationId);
+                        await this.getConversations();
+                      }
+                      break;
+                      
+                    case 'error':
+                      console.error('错误事件:', data);
+                      throw new Error(data.error || '流式响应错误');
+                  }
+                } catch (e) {
+                  console.error('解析事件数据错误:', e);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('流处理错误:', error);
+            // 重置流式状态
+            this.streamingMessage = null;
+            this.isStreaming = false;
+            throw error;
+          }
+        };
+        
+        // 处理流
+        await processStream();
+        
+        return {
+          success: true,
+          data: { conversationId }
+        };
+      } catch (error) {
+        this.isStreaming = false;
+        this.streamingMessage = null;
+        this.error = error.message || '流式响应失败';
+        throw error;
+      }
+    },
+    
+    // 新增：取消流式响应
+    cancelStreamResponse() {
+      if (this.streamController) {
+        this.streamController.abort();
+        this.streamController = null;
+      }
+      this.resetStreamState();
+    },
+    
+    // 新增：重置流式状态
+    resetStreamState() {
+      this.isStreaming = false;
+      this.streamingMessage = null;
+    },
+    
+    // 清除当前对话
+    clearCurrentConversation() {
+      this.currentConversation = null;
+      this.resetStreamState();
     },
     
     // 新增：直接分析图像，不保存对话历史
@@ -292,11 +465,6 @@ export const useConversationStore = defineStore('conversation', {
       } finally {
         this.loading = false;
       }
-    },
-    
-    // 清除当前对话
-    clearCurrentConversation() {
-      this.currentConversation = null;
     }
   }
 });

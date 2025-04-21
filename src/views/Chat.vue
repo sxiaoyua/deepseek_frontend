@@ -31,11 +31,12 @@
         <ChatMessageList
           :messages="currentMessages"
           :is-empty="!currentConversation || currentMessages.length === 0"
-          :typing-indicator="typingIndicator"
+          :typing-indicator="typingIndicator && !conversationStore.isStreaming"
           :sample-questions="sampleQuestions"
           :user="user"
           :user-avatar="userAvatar"
           :ai-avatar="aiAvatar"
+          :streaming-message="conversationStore.streamingMessage"
           ref="messageList"
           @select-question="sendSampleQuestion"
         />
@@ -82,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useConversationStore } from '../stores/conversation';
@@ -230,36 +231,39 @@ const sendMessage = async () => {
     
     const response = await conversationStore.sendMessage(options);
     
-    // 获取会话ID，无论是新建还是已有的
-    if (response?.data && response.data.conversationId) {
-      const conversationId = response.data.conversationId;
-      
-      try {
-        // 确保获取最新的对话信息
-        await conversationStore.getConversation(conversationId);
+    // 如果不是流式响应，执行传统更新流程
+    if (!conversationStore.isStreaming) {
+      // 获取会话ID，无论是新建还是已有的
+      if (response?.data && response.data.conversationId) {
+        const conversationId = response.data.conversationId;
         
-        // 如果对话只有两条消息（用户发送的第一条和AI的回复），则更新标题
-        if (currentConversation.value && currentConversation.value.messages && 
-            currentConversation.value.messages.length <= 2) {
+        try {
+          // 确保获取最新的对话信息
+          await conversationStore.getConversation(conversationId);
           
-          // 将消息内容截断为合适长度作为标题
-          let titleFromContent = message.trim() || '图片对话';
-          if (titleFromContent.length > 30) {
-            titleFromContent = titleFromContent.substring(0, 30) + '...';
-          }
-          
-          if (titleFromContent) {
-            try {
-              await conversationStore.updateConversation(conversationId, { 
-                title: titleFromContent 
-              });
-            } catch (titleError) {
-              console.error('更新标题失败:', titleError);
+          // 如果对话只有两条消息（用户发送的第一条和AI的回复），则更新标题
+          if (currentConversation.value && currentConversation.value.messages && 
+              currentConversation.value.messages.length <= 2) {
+            
+            // 将消息内容截断为合适长度作为标题
+            let titleFromContent = message.trim() || '图片对话';
+            if (titleFromContent.length > 30) {
+              titleFromContent = titleFromContent.substring(0, 30) + '...';
+            }
+            
+            if (titleFromContent) {
+              try {
+                await conversationStore.updateConversation(conversationId, { 
+                  title: titleFromContent 
+                });
+              } catch (titleError) {
+                console.error('更新标题失败:', titleError);
+              }
             }
           }
+        } catch (convError) {
+          console.error('获取对话信息失败:', convError);
         }
-      } catch (convError) {
-        console.error('获取对话信息失败:', convError);
       }
     }
     
@@ -268,8 +272,11 @@ const sendMessage = async () => {
     console.error('发送消息失败:', error);
     ElMessage.error(error.response?.data?.message || '发送消息失败，请重试');
   } finally {
-    sending.value = false;
-    typingIndicator.value = false;
+    // 只有在非流式响应时才设置这些状态
+    if (!conversationStore.isStreaming) {
+      sending.value = false;
+      typingIndicator.value = false;
+    }
   }
 };
 
@@ -537,6 +544,18 @@ onMounted(async () => {
 // 监听对话变化，自动滚动到底部
 watch(currentMessages, () => {
   scrollToBottom();
+});
+
+// 监听流式消息变化，自动滚动到底部
+watch(() => conversationStore.streamingMessage, () => {
+  scrollToBottom();
+}, { deep: true });
+
+// 在组件卸载时取消可能存在的流式响应
+onUnmounted(() => {
+  if (conversationStore.isStreaming) {
+    conversationStore.cancelStreamResponse();
+  }
 });
 </script>
 

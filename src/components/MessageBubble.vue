@@ -20,7 +20,23 @@
       </div>
       
       <!-- AI回复 -->
-      <div class="message-text markdown-content" v-if="!loading && role === 'assistant'" v-html="renderedContent"></div>
+      <div v-if="!loading && role === 'assistant'">
+        <!-- 思考过程 (仅当hasReasoning为true时显示) -->
+        <div v-if="hasReasoning" class="reasoning-container">
+          <div class="reasoning-header" @click="toggleReasoning">
+            <span class="reasoning-title">思考过程</span>
+            <el-icon class="toggle-icon" :class="{ 'is-active': showReasoning }">
+              <ArrowDown />
+            </el-icon>
+          </div>
+          <div v-show="showReasoning" class="reasoning-content">
+            {{ reasoning }}
+          </div>
+        </div>
+        
+        <!-- 最终回答 -->
+        <div class="message-text markdown-content" v-html="renderedContent"></div>
+      </div>
       
       <!-- 加载指示器 -->
       <div class="typing-indicator" v-if="loading">
@@ -35,11 +51,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, nextTick, watch } from 'vue';
+import { computed, onMounted, nextTick, watch, ref } from 'vue';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/atom-one-dark.css'; // 导入一个漂亮的暗色主题
 import { ElMessage } from 'element-plus';
+import { ArrowDown } from '@element-plus/icons-vue';
 
 const props = defineProps({
   role: {
@@ -66,8 +83,27 @@ const props = defineProps({
   loading: {
     type: Boolean,
     default: false
+  },
+  // 添加思考过程相关属性
+  hasReasoning: {
+    type: Boolean,
+    default: false
+  },
+  reasoning: {
+    type: String,
+    default: ''
+  },
+  isStreaming: {
+    type: Boolean,
+    default: false
   }
 });
+
+// 控制思考过程显示状态
+const showReasoning = ref(true);
+const toggleReasoning = () => {
+  showReasoning.value = !showReasoning.value;
+};
 
 // 检查是否有图像
 const hasImage = computed(() => {
@@ -323,6 +359,53 @@ watch(() => renderedContent.value, () => {
   max-width: 50%;
   /* min-width: 300px; */
   margin-left: 10px;
+}
+
+/* 思考过程容器样式 */
+.reasoning-container {
+  /* margin-bottom: 15px; */
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.reasoning-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #f2f6fc;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.reasoning-header:hover {
+  background-color: #e6f1fc;
+}
+
+.reasoning-title {
+  font-weight: 500;
+  color: #409eff;
+}
+
+.toggle-icon {
+  transition: transform 0.3s;
+}
+
+.toggle-icon.is-active {
+  transform: rotate(180deg);
+}
+
+.reasoning-content {
+  padding: 15px;
+  background-color: #fafafa;
+  white-space: pre-wrap;
+  font-family: 'Fira Code', Consolas, Monaco, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+  /* max-height: 300px; */
+  overflow-y: auto;
 }
 
 .message-content-wrapper {

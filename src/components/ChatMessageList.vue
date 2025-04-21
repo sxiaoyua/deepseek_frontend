@@ -15,10 +15,26 @@
         :timestamp="message.timestamp"
         :sender-name="getSenderName(message)"
         :avatar-src="getAvatarSrc(message)"
+        :has-reasoning="message.hasReasoning"
+        :reasoning="message.reasoning"
       />
       
+      <!-- 流式响应消息 -->
       <MessageBubble 
-        v-if="typingIndicator"
+        v-if="streamingMessage"
+        role="assistant"
+        :content="streamingMessage.content"
+        :timestamp="new Date()"
+        sender-name="DeepSeek AI"
+        :avatar-src="aiAvatar"
+        :has-reasoning="streamingMessage.hasReasoning"
+        :reasoning="streamingMessage.reasoning"
+        :is-streaming="true"
+      />
+      
+      <!-- 加载指示器 -->
+      <MessageBubble 
+        v-else-if="typingIndicator"
         role="assistant"
         content=""
         sender-name="DeepSeek AI"
@@ -62,6 +78,11 @@ const props = defineProps({
   aiAvatar: {
     type: String,
     default: ''
+  },
+  // 新增：流式响应的消息
+  streamingMessage: {
+    type: Object,
+    default: null
   }
 });
 
