@@ -83,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
+import { ref, computed, onMounted, watch, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useConversationStore } from '../stores/conversation';
@@ -97,6 +97,7 @@ import ChatHeader from '../components/ChatHeader.vue';
 import ChatMessageList from '../components/ChatMessageList.vue';
 import ChatInputArea from '../components/ChatInputArea.vue';
 import ModelSelector from '../components/ModelSelector.vue';
+import MessageBubble from '../components/MessageBubble.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -191,7 +192,19 @@ const selectConversation = async (id) => {
 // 发送示例问题
 const sendSampleQuestion = (question) => {
   messageInput.value = question;
-  sendMessage();
+  if (!currentConversation.value) {
+    // 如果没有当前对话，先创建一个新对话，然后等待创建完成后再发送消息
+    createNewConversation().then(() => {
+      // 确保对话创建成功后再发送
+      sendMessage();
+    }).catch(error => {
+      console.error('创建新对话失败:', error);
+      ElMessage.error('创建新对话失败，请重试');
+    });
+  } else {
+    // 如果已有当前对话，直接发送
+    sendMessage();
+  }
 };
 
 // 发送消息
@@ -207,14 +220,50 @@ const sendMessage = async () => {
   const message = messageInput.value.trim();
   messageInput.value = '';
   
+  // 检查是否需要创建新对话
   const isNewConversation = !currentConversation.value;
   
+  // 如果是新对话且没有图片附件，先创建新对话
   if (isNewConversation && !imageAttached.value) {
-    await createNewConversation();
+    try {
+      await createNewConversation();
+    } catch (error) {
+      console.error('创建新对话失败:', error);
+      ElMessage.error('创建对话失败，请重试');
+      return; // 如果创建失败，中止发送
+    }
   }
   
   sending.value = true;
   typingIndicator.value = true;
+  
+  // 构建用户消息对象
+  const userMessage = {
+    role: 'user',
+    content: imageAttached.value ? (message ? [
+      { type: 'text', text: message },
+      { type: 'image_url', image_url: { url: imageUrl.value } }
+    ] : [
+      { type: 'image_url', image_url: { url: imageUrl.value } }
+    ]) : message,
+    timestamp: new Date()
+  };
+  
+  // 提前将用户消息添加到对话中，立即更新UI
+  if (currentConversation.value) {
+    // 如果没有messages数组，创建一个
+    if (!currentConversation.value.messages) {
+      currentConversation.value.messages = [];
+    }
+    
+    // 添加用户消息到当前对话
+    currentConversation.value.messages.push(userMessage);
+    
+    // 立即滚动到底部显示新消息
+    nextTick(() => {
+      scrollToBottom();
+    });
+  }
   
   try {
     const options = {
@@ -265,12 +314,38 @@ const sendMessage = async () => {
           console.error('获取对话信息失败:', convError);
         }
       }
+    } else {
+      // 流式响应 - 只处理标题更新，不额外获取对话详情
+      console.log('流式响应中，跳过对话详情刷新');
+      // 如果是新建的对话（消息只有一条用户输入），设置标题
+      if (currentConversation.value && currentConversation.value.messages && 
+          currentConversation.value.messages.length === 1) {
+        
+        const conversationId = currentConversation.value._id;
+        let titleFromContent = message.trim() || '图片对话';
+        if (titleFromContent.length > 30) {
+          titleFromContent = titleFromContent.substring(0, 30) + '...';
+        }
+        
+        if (titleFromContent && conversationId) {
+          try {
+            await conversationStore.updateConversation(conversationId, { 
+              title: titleFromContent 
+            });
+          } catch (titleError) {
+            console.error('更新标题失败:', titleError);
+          }
+        }
+      }
     }
     
     scrollToBottom();
   } catch (error) {
     console.error('发送消息失败:', error);
     ElMessage.error(error.response?.data?.message || '发送消息失败，请重试');
+    
+    // 如果发送失败，可以考虑从对话中移除之前添加的用户消息
+    // 或者添加一个标记，表示发送失败
   } finally {
     // 只有在非流式响应时才设置这些状态
     if (!conversationStore.isStreaming) {
@@ -550,6 +625,16 @@ watch(currentMessages, () => {
 watch(() => conversationStore.streamingMessage, () => {
   scrollToBottom();
 }, { deep: true });
+
+// 监听流式状态变化，当流结束时重置加载指示器
+watch(() => conversationStore.isStreaming, (isStreaming) => {
+  // 当流式响应结束时
+  if (!isStreaming && typingIndicator.value) {
+    // 重置加载指示器和发送状态
+    sending.value = false;
+    typingIndicator.value = false;
+  }
+}, { immediate: true });
 
 // 在组件卸载时取消可能存在的流式响应
 onUnmounted(() => {

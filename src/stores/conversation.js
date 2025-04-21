@@ -16,7 +16,7 @@ export const useConversationStore = defineStore('conversation', {
     modelCapabilities: {},
     // 新增：流式响应状态
     streamingMessage: null,
-    isStreaming: false,
+    isStreaming: true,
     streamController: null
   }),
   
@@ -257,7 +257,7 @@ export const useConversationStore = defineStore('conversation', {
         
         // 判断是否使用流式响应
         const currentModel = this.currentModel;
-        const useStream = currentModel && currentModel.includes('deepseek');
+        const useStream = true;
         
         if (useStream) {
           return this.sendStreamMessage(payload);
@@ -386,10 +386,20 @@ export const useConversationStore = defineStore('conversation', {
                       this.streamingMessage = null;
                       this.isStreaming = false;
                       
-                      // 刷新对话数据
+                      // 更新对话和列表的ID（但不重新获取内容）
                       if (conversationId) {
-                        await this.getConversation(conversationId);
-                        await this.getConversations();
+                        // 如果是新建的对话，需要更新列表（轻量更新方式）
+                        if (!this.currentConversation || this.currentConversation._id !== conversationId) {
+                          // 如果是新对话，只获取对话列表
+                          await this.getConversations();
+                          
+                          // 设置当前对话ID
+                          if (!this.currentConversation) {
+                            this.currentConversation = { _id: conversationId };
+                          }
+                        }
+                        
+                        // 注意：不再调用getConversation(id)获取详情，避免额外请求和UI闪烁
                       }
                       break;
                       
